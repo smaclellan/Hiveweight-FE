@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+
+# Output (committed by CI bot — don't ignore if you want the dashboard to work from main)
+# output/
+
+# Archives
+*.zip
+
+# Pages build
+_site/

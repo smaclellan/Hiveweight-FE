@@ -1,0 +1,32 @@
+{
+  "drop_threshold_pct": 35,
+  "sustained_days": 3,
+  "rolling_window_days": 7,
+  "baseline_days": 30,
+  "lookback_days": 90,
+  "weights": {
+    "merged_pr": 3.0,
+    "commit": 1.0,
+    "issue_opened": 0.5,
+    "issue_comment": 0.3
+  },
+  "dampening": {
+    "weekends": true,
+    "weekend_multiplier": 0.5,
+    "holidays": true,
+    "holiday_calendar": ["US", "global"]
+  },
+  "known_holidays": [
+    "01-01", "01-15", "02-19", "05-27", "06-19",
+    "07-04", "09-02", "11-28", "11-29", "12-25", "12-26"
+  ],
+  "pressure_escalation_ratio": 2.5,
+  "seasonal_sabbaticals": [],
+  "repos": [
+    "pytest-dev/pytest",
+    "bottlepy/bottle",
+    "microsoft/TypeScript",
+    "huggingface/transformers"
+  ],
+  "output_dir": "./output"
+}

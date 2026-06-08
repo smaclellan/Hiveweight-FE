@@ -1,0 +1,207 @@
+name: HiveWeight — Daily Burnout Scan
+
+on:
+  schedule:
+    # Run every day at 09:00 UTC
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+    # Allow manual runs from the Actions tab
+    inputs:
+      repos:
+        description: "Space-separated owner/repo overrides (leave blank to use config.json)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run (no API calls)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write      # needed to commit output files back to the repo
+  pages: write         # needed if deploying dashboard to GitHub Pages
+  id-token: write      # needed for OIDC Pages deployment
+
+jobs:
+  scan:
+    name: Scan repositories
+    runs-on: ubuntu-latest
+    outputs:
+      alert_count: ${{ steps.scan.outputs.alert_count }}
+      alert_repos: ${{ steps.scan.outputs.alert_repos }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests python-dateutil holidays
+
+      - name: Run HiveWeight scanner
+        id: scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.HIVEWEIGHT_TOKEN || secrets.GITHUB_TOKEN }}
+          REPOS_INPUT: ${{ github.event.inputs.repos }}
+          DRY_RUN_INPUT: ${{ github.event.inputs.dry_run }}
+        run: |
+          # Build CLI args
+          EXTRA_ARGS=""
+          if [ "$DRY_RUN_INPUT" = "true" ]; then
+            EXTRA_ARGS="--dry-run"
+          fi
+
+          if [ -n "$REPOS_INPUT" ]; then
+            # Split safely via read -ra to prevent shell injection
+            read -ra REPO_ARGS <<< "$REPOS_INPUT"
+            python hiveweight.py "${REPO_ARGS[@]}" $EXTRA_ARGS
+          else
+            python hiveweight.py --config config.json $EXTRA_ARGS
+          fi
+
+          # Parse summary files and set outputs
+          ALERT_COUNT=0
+          ALERT_REPOS=""
+          for f in output/*/summary.json; do
+            status=$(python -c "import json,sys; d=json.load(open('$f')); print(d.get('status','OK'))")
+            repo=$(python -c "import json,sys; d=json.load(open('$f')); print(d.get('repo',''))")
+            if [ "$status" = "ALERT" ]; then
+              ALERT_COUNT=$((ALERT_COUNT + 1))
+              ALERT_REPOS="$ALERT_REPOS $repo"
+            fi
+          done
+
+          echo "alert_count=$ALERT_COUNT" >> "$GITHUB_OUTPUT"
+          echo "alert_repos=${ALERT_REPOS# }" >> "$GITHUB_OUTPUT"
+          echo "🐝 Scan complete — $ALERT_COUNT alert(s): ${ALERT_REPOS:-none}"
+
+      - name: Upload scan artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hiveweight-reports-${{ github.run_number }}
+          path: output/
+          retention-days: 90
+
+      - name: Commit output back to repo
+        # Only commit on scheduled runs, not manual dry-runs
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+        run: |
+          git config user.name  "HiveWeight Bot"
+          git config user.email "hiveweight-bot@users.noreply.github.com"
+          git add output/
+          # Only commit if there are changes
+          if git diff --staged --quiet; then
+            echo "No output changes to commit"
+          else
+            git commit -m "chore: hiveweight scan $(date -u +%Y-%m-%d)"
+            git push
+          fi
+
+  # ── Alert notification ──────────────────────────────────────────────────────
+  notify:
+    name: Send alert notification
+    runs-on: ubuntu-latest
+    needs: scan
+    if: needs.scan.outputs.alert_count != '0'
+
+    steps:
+      - name: Create GitHub issue for active alerts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const alertRepos = `${{ needs.scan.outputs.alert_repos }}`.trim();
+            const alertCount = `${{ needs.scan.outputs.alert_count }}`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            // Check if an open HiveWeight alert issue already exists
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'hiveweight-alert',
+              state: 'open',
+            });
+
+            const body = [
+              `## 🐝 HiveWeight Alert — ${alertCount} repo(s) flagged`,
+              ``,
+              `Detected on: ${new Date().toUTCString()}`,
+              ``,
+              `**Repos with sustained activity drops:**`,
+              alertRepos.split(' ').map(r => `- \`${r}\``).join('\n'),
+              ``,
+              `A 35%+ drop sustained for 3+ consecutive days was detected in each repo above.`,
+              `This may indicate maintainer fatigue, a planned freeze, or a holiday period.`,
+              ``,
+              `**Next steps:**`,
+              `1. Check the [scan artifacts](${runUrl}) for full reports`,
+              `2. Cross-reference with recent release tags and known holidays`,
+              `3. Consider reaching out to maintainers or redistributing review load`,
+              ``,
+              `---`,
+              `_Generated by [HiveWeight](https://github.com/${context.repo.owner}/${context.repo.repo}) · [View dashboard](https://${context.repo.owner}.github.io/${context.repo.repo}/)_`,
+            ].join('\n');
+
+            if (issues.data.length > 0) {
+              // Update existing issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issues.data[0].number,
+                body: `### Updated scan — ${new Date().toUTCString()}\n\n${alertRepos.split(' ').map(r => `- \`${r}\``).join('\n')}`,
+              });
+              console.log(`Updated existing alert issue #${issues.data[0].number}`);
+            } else {
+              // Open a new issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🐝 HiveWeight: ${alertCount} repo(s) flagged — ${new Date().toISOString().slice(0,10)}`,
+                body,
+                labels: ['hiveweight-alert'],
+              });
+              console.log(`Created alert issue #${issue.data.number}`);
+            }
+
+  # ── Deploy dashboard to GitHub Pages ───────────────────────────────────────
+  deploy-dashboard:
+    name: Deploy dashboard to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: scan
+    # Deploy on every scheduled run (even if no alerts — keeps the dashboard fresh)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Pull the latest (including committed output/ files)
+          ref: ${{ github.ref }}
+
+      - name: Pull latest output (if scan committed changes)
+        run: git pull --rebase
+
+      - name: Assemble Pages site
+        run: |
+          mkdir -p _site/output
+          cp index.html _site/index.html
+          # Copy all scan output so the dashboard can fetch it
+          if [ -d output ]; then
+            cp -r output/. _site/output/
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

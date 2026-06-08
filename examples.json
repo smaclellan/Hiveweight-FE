@@ -1,0 +1,56 @@
+[
+  {
+    "slug": "facebook/react",
+    "status": "ALERT",
+    "health": "alert",
+    "baseline_daily_avg": 5.4,
+    "total_weighted_events": 487,
+    "config": { "drop_threshold_pct": 35, "sustained_days": 3, "rolling_window_days": 7 },
+    "flags": [{ "start_days_ago": 8, "end_days_ago": 0, "streak_days": 9, "drop_pct": 41.2, "rolling_avg": 3.2 }]
+  },
+  {
+    "slug": "vuejs/vue",
+    "status": "OK",
+    "health": "ok",
+    "baseline_daily_avg": 7.3,
+    "total_weighted_events": 612,
+    "config": { "drop_threshold_pct": 35, "sustained_days": 3, "rolling_window_days": 7 },
+    "flags": []
+  },
+  {
+    "slug": "expressjs/express",
+    "status": "WATCHING",
+    "health": "watching",
+    "baseline_daily_avg": 3.1,
+    "total_weighted_events": 268,
+    "config": { "drop_threshold_pct": 35, "sustained_days": 3, "rolling_window_days": 7 },
+    "flags": []
+  },
+  {
+    "slug": "pallets/flask",
+    "status": "OK",
+    "health": "ok",
+    "baseline_daily_avg": 2.8,
+    "total_weighted_events": 241,
+    "config": { "drop_threshold_pct": 35, "sustained_days": 3, "rolling_window_days": 7 },
+    "flags": []
+  },
+  {
+    "slug": "torvalds/linux",
+    "status": "ALERT",
+    "health": "alert",
+    "baseline_daily_avg": 3.55,
+    "total_weighted_events": 318,
+    "config": { "drop_threshold_pct": 35, "sustained_days": 3, "rolling_window_days": 7 },
+    "flags": [{ "start_days_ago": 8, "end_days_ago": 0, "streak_days": 9, "drop_pct": 73.3, "rolling_avg": 0.95 }]
+  },
+  {
+    "slug": "django/django",
+    "status": "OK",
+    "health": "ok",
+    "baseline_daily_avg": 6.1,
+    "total_weighted_events": 530,
+    "config": { "drop_threshold_pct": 35, "sustained_days": 3, "rolling_window_days": 7 },
+    "flags": []
+  }
+]

@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HiveWeight — OSS Health Index</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@400;500;600;700;800&display=swap');
+
+  :root {
+    --bg:        #0e0d0b;
+    --bg2:       #161410;
+    --bg3:       #1e1b16;
+    --border:    rgba(250,199,117,0.12);
+    --border2:   rgba(250,199,117,0.22);
+    --amber:     #EF9F27;
+    --amber-dim: #BA7517;
+    --amber-pale:#FAC775;
+    --teal:      #1D9E75;
+    --teal-pale: #5DCAA5;
+    --coral:     #D85A30;
+    --coral-pale:#F0997B;
+    --text:      #f0ead8;
+    --text2:     #a09880;
+    --text3:     #6b6050;
+    --ok:        #1D9E75;
+    --warn:      #BA7517;
+    --alert:     #D85A30;
+    --critical:  #FF3333;
+    --radius:    8px;
+    --radius-lg: 14px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  /* ── Layout ── */
+  .site-header {
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 60px; position: sticky; top: 0; z-index: 100;
+    background: rgba(14,13,11,0.92); backdrop-filter: blur(12px);
+  }
+  .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .logo-hex { width: 28px; height: 28px; }
+  .logo-name { font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: -0.3px; }
+  .logo-tag { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text3); margin-left: 6px; }
+
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .scan-time { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text3); }
+  .btn-refresh {
+    font-size: 12px; font-family: 'DM Mono', monospace;
+    background: transparent; border: 1px solid var(--border2); border-radius: var(--radius);
+    color: var(--amber); padding: 5px 12px; cursor: pointer; transition: all 0.15s;
+  }
+  .btn-refresh:hover { background: rgba(239,159,39,0.08); border-color: var(--amber); }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+
+  /* ── Summary bar ── */
+  .summary-bar {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px; margin-bottom: 2rem;
+  }
+  .stat-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px 18px;
+    transition: border-color 0.2s;
+  }
+  .stat-card:hover { border-color: var(--border2); }
+  .stat-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; }
+  .stat-val { font-size: 28px; font-weight: 700; letter-spacing: -1px; line-height: 1; }
+  .stat-sub { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text3); margin-top: 5px; }
+  .val-alert { color: var(--coral); }
+  .val-warn  { color: var(--amber); }
+  .val-ok    { color: var(--teal-pale); }
+  .val-dim   { color: var(--text); }
+
+  /* ── Repo grid ── */
+  .section-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .section-title { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text3); letter-spacing: 0.08em; text-transform: uppercase; }
+  .filter-row { display: flex; gap: 6px; }
+  .filter-btn {
+    font-size: 11px; font-family: 'DM Mono', monospace;
+    background: transparent; border: 1px solid var(--border); border-radius: 99px;
+    color: var(--text3); padding: 3px 10px; cursor: pointer; transition: all 0.15s;
+  }
+  .filter-btn.active { background: rgba(239,159,39,0.1); border-color: var(--amber-dim); color: var(--amber); }
+
+  .repo-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 14px; margin-bottom: 2.5rem;
+  }
+
+  .repo-card {
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); overflow: hidden;
+    cursor: pointer; transition: border-color 0.15s, transform 0.1s;
+  }
+  .repo-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+  .repo-card.status-ALERT  { border-left: 3px solid var(--coral); }
+  .repo-card.status-WATCHING { border-left: 3px solid var(--amber); }
+  .repo-card.status-OK     { border-left: 3px solid var(--teal); }
+  .repo-card.status-CRITICAL-ALERT {
+    border-left: 3px dashed var(--critical);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .repo-card.hidden { display: none; }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,51,51,0); }
+    50%       { box-shadow: 0 0 0 6px rgba(255,51,51,0.18); }
+  }
+
+  .card-head {
+    padding: 14px 16px 10px;
+    display: flex; align-items: flex-start; justify-content: space-between;
+  }
+  .repo-name { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .repo-meta { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text3); }
+  .status-pill {
+    font-size: 10px; font-family: 'DM Mono', monospace; font-weight: 500;
+    padding: 3px 9px; border-radius: 99px; letter-spacing: 0.04em; flex-shrink: 0;
+  }
+  .pill-ALERT          { background: rgba(216,90,48,0.15);  color: var(--coral-pale); border: 1px solid rgba(216,90,48,0.3); }
+  .pill-WATCHING       { background: rgba(186,117,23,0.15); color: var(--amber-pale); border: 1px solid rgba(186,117,23,0.3); }
+  .pill-OK             { background: rgba(29,158,117,0.12); color: var(--teal-pale);  border: 1px solid rgba(29,158,117,0.25); }
+  .pill-CRITICAL-ALERT { background: rgba(255,51,51,0.15);  color: #FF9999;           border: 1px solid rgba(255,51,51,0.4); font-weight: 700; }
+
+  .card-chart { padding: 0 16px 4px; height: 64px; position: relative; }
+  .card-chart canvas { width: 100% !important; }
+
+  .card-foot {
+    padding: 10px 16px 14px;
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px; border-top: 1px solid var(--border);
+  }
+  .foot-stat { }
+  .foot-label { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--text3); }
+  .foot-val { font-size: 13px; font-weight: 600; margin-top: 1px; }
+
+  /* ── Detail panel ── */
+  .detail-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: flex; align-items: flex-start; justify-content: flex-end;
+    z-index: 200; opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .detail-overlay.open { opacity: 1; pointer-events: all; }
+  .detail-panel {
+    width: min(600px, 100vw); height: 100vh; overflow-y: auto;
+    background: var(--bg2); border-left: 1px solid var(--border2);
+    padding: 24px; transform: translateX(40px); transition: transform 0.25s;
+  }
+  .detail-overlay.open .detail-panel { transform: translateX(0); }
+  .detail-close {
+    float: right; background: transparent; border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text3); font-size: 18px;
+    cursor: pointer; padding: 2px 9px; line-height: 1.4; transition: all 0.15s;
+  }
+  .detail-close:hover { border-color: var(--border2); color: var(--text); }
+  .detail-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.5px; }
+  .detail-sub { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--text3); margin-bottom: 20px; }
+  .detail-chart-wrap { position: relative; height: 200px; margin-bottom: 20px; }
+  .detail-flags { margin-bottom: 20px; }
+  .flag-item {
+    background: rgba(216,90,48,0.07); border: 1px solid rgba(216,90,48,0.2);
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px;
+  }
+  .flag-dates { font-size: 13px; font-weight: 600; color: var(--coral-pale); margin-bottom: 4px; }
+  .flag-detail { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--text2); }
+  .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .cfg-item { background: var(--bg3); border-radius: var(--radius); padding: 10px 12px; }
+  .cfg-key { font-size: 10px; font-family: 'DM Mono', monospace; color: var(--text3); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px; }
+  .cfg-val { font-size: 15px; font-weight: 600; }
+
+  /* ── Watchlist section ── */
+  .watchlist-info {
+    background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 18px 20px; margin-bottom: 2rem;
+  }
+  .watchlist-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+  .watchlist-body { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--text2); line-height: 1.7; }
+  .watchlist-body code { color: var(--amber); }
+
+  /* ── Empty / loading ── */
+  .empty-state {
+    text-align: center; padding: 60px 20px;
+    color: var(--text3); font-family: 'DM Mono', monospace; font-size: 13px;
+  }
+  .empty-hex { font-size: 40px; display: block; margin-bottom: 12px; opacity: 0.4; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <a class="logo" href="#">
+    <svg class="logo-hex" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <polygon points="14,1 26,7.5 26,20.5 14,27 2,20.5 2,7.5" fill="#EF9F27" opacity="0.9"/>
+      <polygon points="14,6 21,10 21,18 14,22 7,18 7,10" fill="#BA7517" opacity="0.5"/>
+      <text x="14" y="19" text-anchor="middle" font-size="10" fill="#FAC775">🐝</text>
+    </svg>
+    <span class="logo-name">HiveWeight</span>
+    <span class="logo-tag">oss health index</span>
+  </a>
+  <div class="header-right">
+    <span class="scan-time" id="scanTime">last scan: —</span>
+    <button class="btn-refresh" onclick="loadData()">↻ refresh</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- Summary bar -->
+  <div class="summary-bar" id="summaryBar">
+    <div class="stat-card">
+      <div class="stat-label">repos tracked</div>
+      <div class="stat-val val-dim" id="totalRepos">—</div>
+      <div class="stat-sub">across watchlist</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">alerts active</div>
+      <div class="stat-val val-alert" id="alertCount">—</div>
+      <div class="stat-sub">sustained drops</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">watching</div>
+      <div class="stat-val val-warn" id="watchCount">—</div>
+      <div class="stat-sub">below threshold, not sustained</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">healthy</div>
+      <div class="stat-val val-ok" id="okCount">—</div>
+      <div class="stat-sub">within normal range</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">avg baseline</div>
+      <div class="stat-val val-dim" id="avgBaseline">—</div>
+      <div class="stat-sub">weighted events/day</div>
+    </div>
+  </div>
+
+  <!-- Repo grid -->
+  <div class="section-head">
+    <span class="section-title">repositories</span>
+    <div class="filter-row">
+      <button class="filter-btn active" onclick="filterCards('ALL', this)">all</button>
+      <button class="filter-btn" onclick="filterCards('ALERT', this)">alerts</button>
+      <button class="filter-btn" onclick="filterCards('WATCHING', this)">watching</button>
+      <button class="filter-btn" onclick="filterCards('OK', this)">healthy</button>
+    </div>
+  </div>
+
+  <div class="repo-grid" id="repoGrid">
+    <div class="empty-state">
+      <span class="empty-hex">⬡</span>
+      Loading repo data…
+    </div>
+  </div>
+
+  <!-- Watchlist info -->
+  <div class="watchlist-info">
+    <div class="watchlist-title">🐝 Adding repos to your watchlist</div>
+    <div class="watchlist-body">
+      Edit <code>config.json</code> → <code>"repos"</code> array, then re-run the scanner:<br>
+      <code>python hiveweight.py --config config.json</code><br><br>
+      The dashboard reads <code>output/&lt;owner&gt;_&lt;repo&gt;/summary.json</code> and <code>activity.csv</code> automatically.
+      Host this file anywhere static (GitHub Pages, Netlify, S3) — no server required.
+    </div>
+  </div>
+
+</main>
+
+<!-- Detail panel -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetail(event)">
+  <div class="detail-panel" id="detailPanel">
+    <button class="detail-close" onclick="closeDetail()">✕</button>
+    <div class="detail-title" id="detailTitle">—</div>
+    <div class="detail-sub" id="detailSub">—</div>
+    <div class="detail-chart-wrap">
+      <canvas id="detailChart" role="img" aria-label="Detailed activity chart for selected repository"></canvas>
+    </div>
+    <div class="detail-flags" id="detailFlags"></div>
+    <div class="section-title" style="margin-bottom:10px">configuration used</div>
+    <div class="cfg-grid" id="detailCfg"></div>
+  </div>
+</div>
+
+<script>
+// ── Data loading ──────────────────────────────────────────────────────────────
+// The dashboard reads from ./output/<owner>_<repo>/summary.json + activity.csv
+// Falls back to examples.json when no scanned output is present.
+
+function genActivity(health) {
+  const rows = []; let seed = health === 'alert' ? 42 : health === 'watching' ? 7 : 13;
+  function rand() { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed >>> 0) / 0xffffffff; }
+  const base = 4 + rand() * 6;
+  for (let i = 0; i < 90; i++) {
+    let v = base + (rand() - 0.5) * 4;
+    if (health === 'alert' && i > 80) v *= 0.35 + rand() * 0.2;
+    if (health === 'watching' && i > 75) v *= 0.55 + rand() * 0.15;
+    if (i % 7 === 0 || i % 7 === 6) v *= 0.5;
+    rows.push(Math.max(0, +v.toFixed(2)));
+  }
+  return rows;
+}
+
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function rolling(arr, w) {
+  return arr.map((_, i) => i < w-1 ? null : +(arr.slice(i-w+1,i+1).reduce((a,b)=>a+b,0)/w).toFixed(2));
+}
+
+// ── Attempt real data load, fall back to demo ─────────────────────────────────
+let repoData = [];
+
+async function tryFetchRepo(slug) {
+  const key = slug.replace('/', '_');
+  const base = `./output/${key}`;
+  try {
+    const [sRes, aRes] = await Promise.all([
+      fetch(`${base}/summary.json`),
+      fetch(`${base}/activity.csv`),
+    ]);
+    if (!sRes.ok) return null;
+    const summary = await sRes.json();
+    const csvText = aRes.ok ? await aRes.text() : '';
+    const rows = csvText.trim().split('\n').slice(1)
+      .map(r => r.split(','))
+      .filter(r => r.length >= 2);
+    summary._activity = rows.map(r => parseFloat(r[1]) || 0);
+    if (!summary.status) {
+      summary.status = summary.flags && summary.flags.length > 0 ? 'ALERT' : 'OK';
+    }
+    return summary;
+  } catch { return null; }
+}
+
+async function loadData() {
+  // Try to find actual output directories
+  let loaded = [];
+
+  // Check if we have real output data
+  const demo0 = await tryFetchRepo('facebook/react');
+  if (demo0) {
+    // Real data available — scan known repos from config attempt
+    const candidates = [
+      'facebook/react','vuejs/vue','expressjs/express','pallets/flask',
+      'torvalds/linux','django/django','rails/rails','rust-lang/rust',
+      'golang/go','denoland/deno',
+    ];
+    const results = await Promise.all(candidates.map(tryFetchRepo));
+    loaded = results.filter(Boolean);
+  }
+
+  if (loaded.length === 0) {
+    // Fall back to examples.json
+    try {
+      const examples = await fetch('./examples.json').then(r => r.json());
+      const now = new Date().toISOString();
+      loaded = examples.map(e => ({
+        ...e,
+        generated_at: now,
+        _activity: genActivity(e.health || 'ok'),
+        flags: (e.flags || []).map(f => ({
+          ...f,
+          start: f.start_days_ago != null ? daysAgo(f.start_days_ago) : f.start,
+          end:   f.end_days_ago   != null ? daysAgo(f.end_days_ago)   : f.end,
+        })),
+      }));
+    } catch { loaded = []; }
+    document.getElementById('scanTime').textContent = 'demo mode — run scanner for real data';
+  } else {
+    const newest = loaded.reduce((a, b) =>
+      new Date(a.generated_at) > new Date(b.generated_at) ? a : b);
+    document.getElementById('scanTime').textContent =
+      'last scan: ' + new Date(newest.generated_at).toLocaleString();
+  }
+
+  repoData = loaded;
+  renderAll();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+const miniCharts = {};
+let detailChartObj = null;
+
+function renderAll() {
+  // Summary counts
+  const alerts   = repoData.filter(r => r.status === 'ALERT' || r.status === 'CRITICAL ALERT').length;
+  const watching = repoData.filter(r => r.status === 'WATCHING').length;
+  const ok       = repoData.filter(r => r.status === 'OK').length;
+  const avgBase  = repoData.length
+    ? (repoData.reduce((s,r) => s + (r.baseline_daily_avg||0), 0) / repoData.length).toFixed(1)
+    : '—';
+
+  document.getElementById('totalRepos').textContent  = repoData.length;
+  document.getElementById('alertCount').textContent  = alerts;
+  document.getElementById('watchCount').textContent  = watching;
+  document.getElementById('okCount').textContent     = ok;
+  document.getElementById('avgBaseline').textContent = avgBase;
+
+  // Destroy old mini charts
+  Object.values(miniCharts).forEach(c => c.destroy());
+
+  const grid = document.getElementById('repoGrid');
+  grid.innerHTML = repoData.map((r, i) => cardHTML(r, i)).join('');
+
+  // Draw mini sparklines after DOM update
+  requestAnimationFrame(() => {
+    repoData.forEach((r, i) => drawMini(r, i));
+  });
+}
+
+function statusLabel(s) {
+  if (s === 'CRITICAL ALERT') return 'critical';
+  if (s === 'ALERT') return 'alert';
+  if (s === 'WATCHING') return 'watching';
+  return 'healthy';
+}
+
+function statusCssClass(s) {
+  return s.replace(/ /g, '-');
+}
+
+function dropColor(s) {
+  if (s === 'CRITICAL ALERT') return '#FF3333';
+  if (s === 'ALERT') return '#D85A30';
+  if (s === 'WATCHING') return '#BA7517';
+  return '#1D9E75';
+}
+
+function cardHTML(r, i) {
+  const slug = r.repo || r.slug || '—';
+  const flags = r.flags || [];
+  const drop = flags.length ? flags[flags.length - 1].drop_pct : 0;
+  const base = (r.baseline_daily_avg || 0).toFixed(1);
+  const total = r.total_weighted_events || 0;
+
+  return `
+  <div class="repo-card status-${statusCssClass(r.status)}" data-idx="${i}" onclick="openDetail(${i})">
+    <div class="card-head">
+      <div>
+        <div class="repo-name">${slug}</div>
+        <div class="repo-meta">${base} events/day baseline</div>
+      </div>
+      <span class="status-pill pill-${statusCssClass(r.status)}">${statusLabel(r.status)}</span>
+    </div>
+    <div class="card-chart">
+      <canvas id="mini-${i}" height="64" role="img" aria-label="Activity sparkline for ${slug}"></canvas>
+    </div>
+    <div class="card-foot">
+      <div class="foot-stat">
+        <div class="foot-label">drop</div>
+        <div class="foot-val" style="color:${dropColor(r.status)}">${flags.length ? drop.toFixed(0) + '%' : '—'}</div>
+      </div>
+      <div class="foot-stat">
+        <div class="foot-label">flags</div>
+        <div class="foot-val">${flags.length}</div>
+      </div>
+      <div class="foot-stat">
+        <div class="foot-label">events</div>
+        <div class="foot-val">${total}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function drawMini(r, i) {
+  const canvas = document.getElementById(`mini-${i}`);
+  if (!canvas) return;
+  const raw = r._activity || [];
+  const r7  = rolling(raw, 7);
+  const base = raw.length ? raw.slice(0, 30).reduce((a,b)=>a+b,0)/30 : 0;
+  const color = dropColor(r.status);
+
+  miniCharts[i] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: raw.map((_, idx) => idx),
+      datasets: [
+        { data: raw, borderColor: 'transparent', backgroundColor: color + '18', fill: true, pointRadius: 0, tension: 0.3 },
+        { data: r7,  borderColor: color, borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.4 },
+        { data: Array(90).fill(base), borderColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderDash: [3,3], pointRadius: 0, fill: false },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false } },
+      animation: false,
+    }
+  });
+}
+
+// ── Detail panel ──────────────────────────────────────────────────────────────
+function openDetail(i) {
+  const r = repoData[i];
+  const slug = r.repo || r.slug || '—';
+  const flags = r.flags || [];
+  const raw = r._activity || [];
+  const r7 = rolling(raw, 7);
+  const base = raw.length ? raw.slice(0, 30).reduce((a,b)=>a+b,0)/30 : 0;
+  const threshold = base * (1 - (r.config?.drop_threshold_pct || 35) / 100);
+
+  document.getElementById('detailTitle').textContent = slug;
+  document.getElementById('detailSub').textContent =
+    `status: ${statusLabel(r.status)} · baseline: ${(r.baseline_daily_avg||0).toFixed(2)} events/day · ${raw.length} days of data`;
+
+  // Flags
+  const flagEl = document.getElementById('detailFlags');
+  if (flags.length) {
+    flagEl.innerHTML = `<div class="section-title" style="margin-bottom:10px">flagged windows</div>` +
+      flags.map(f => `
+        <div class="flag-item">
+          <div class="flag-dates">⚠ ${f.start} → ${f.end} &nbsp;(${f.streak_days} days)</div>
+          <div class="flag-detail">rolling avg ${f.rolling_avg} · ↓${f.drop_pct}% below baseline</div>
+        </div>`).join('');
+  } else {
+    flagEl.innerHTML = `<div class="flag-item" style="background:rgba(29,158,117,0.07);border-color:rgba(29,158,117,0.2)"><div class="flag-dates" style="color:#5DCAA5">✓ No flags in this period</div></div>`;
+  }
+
+  // Config
+  const cfg = r.config || {};
+  document.getElementById('detailCfg').innerHTML = [
+    ['drop threshold', (cfg.drop_threshold_pct || 35) + '%'],
+    ['sustained days', (cfg.sustained_days || 3) + 'd'],
+    ['rolling window', (cfg.rolling_window_days || 7) + 'd'],
+    ['baseline period', '30d'],
+  ].map(([k,v]) => `<div class="cfg-item"><div class="cfg-key">${k}</div><div class="cfg-val">${v}</div></div>`).join('');
+
+  // Big chart
+  if (detailChartObj) detailChartObj.destroy();
+  const color = dropColor(r.status);
+  const labels = Array.from({length: raw.length}, (_, idx) => {
+    const d = new Date(); d.setDate(d.getDate() - (raw.length - 1 - idx));
+    return (d.getMonth()+1) + '/' + d.getDate();
+  });
+
+  detailChartObj = new Chart(document.getElementById('detailChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'daily events', data: raw, backgroundColor: color + '22', borderColor: 'transparent', borderRadius: 2, order: 3 },
+        { label: '7d avg', data: r7, type: 'line', borderColor: color, borderWidth: 2, pointRadius: 0, fill: false, tension: 0.4, order: 1 },
+        { label: '30d baseline', data: Array(raw.length).fill(+base.toFixed(2)), type: 'line', borderColor: 'rgba(255,255,255,0.25)', borderWidth: 1.5, borderDash: [5,4], pointRadius: 0, fill: false, order: 2 },
+        { label: 'alert threshold', data: Array(raw.length).fill(+threshold.toFixed(2)), type: 'line', borderColor: '#D85A30', borderWidth: 1, borderDash: [3,3], pointRadius: 0, fill: false, order: 2 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { mode: 'index', intersect: false, backgroundColor: '#161410', borderColor: 'rgba(250,199,117,0.2)', borderWidth: 1, titleColor: '#f0ead8', bodyColor: '#a09880', titleFont: { family: 'DM Mono' }, bodyFont: { family: 'DM Mono', size: 11 } }
+      },
+      scales: {
+        x: { ticks: { autoSkip: true, maxTicksLimit: 10, color: '#6b6050', font: { family: 'DM Mono', size: 10 }, maxRotation: 0 }, grid: { display: false }, border: { color: 'rgba(250,199,117,0.1)' } },
+        y: { ticks: { color: '#6b6050', font: { family: 'DM Mono', size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' }, border: { display: false } }
+      }
+    }
+  });
+
+  document.getElementById('detailOverlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDetail(e) {
+  if (e && e.target !== document.getElementById('detailOverlay') && !e.target.classList.contains('detail-close')) return;
+  document.getElementById('detailOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail({ target: document.getElementById('detailOverlay') }); });
+
+// ── Filtering ─────────────────────────────────────────────────────────────────
+function filterCards(status, btn) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.repo-card').forEach(card => {
+    const idx = parseInt(card.dataset.idx);
+    const r = repoData[idx];
+    const isAlert = status === 'ALERT' && (r.status === 'ALERT' || r.status === 'CRITICAL ALERT');
+    const match = status === 'ALL' || isAlert || r.status === status;
+    card.classList.toggle('hidden', !match);
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>
