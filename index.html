@@ -357,21 +357,17 @@ async function tryFetchRepo(slug) {
 }
 
 async function loadData() {
-  // Try to find actual output directories
   let loaded = [];
 
-  // Check if we have real output data
-  const demo0 = await tryFetchRepo('facebook/react');
-  if (demo0) {
-    // Real data available — scan known repos from config attempt
-    const candidates = [
-      'facebook/react','vuejs/vue','expressjs/express','pallets/flask',
-      'torvalds/linux','django/django','rails/rails','rust-lang/rust',
-      'golang/go','denoland/deno',
-    ];
-    const results = await Promise.all(candidates.map(tryFetchRepo));
-    loaded = results.filter(Boolean);
-  }
+  // Read repos list from config.json
+  try {
+    const cfg = await fetch('./config.json').then(r => r.json());
+    const repos = cfg.repos || [];
+    if (repos.length > 0) {
+      const results = await Promise.all(repos.map(tryFetchRepo));
+      loaded = results.filter(Boolean);
+    }
+  } catch { /* config.json missing — fall through to examples */ }
 
   if (loaded.length === 0) {
     // Fall back to examples.json
